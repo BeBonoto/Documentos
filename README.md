@@ -136,26 +136,58 @@ curl http://localhost:8080/instance/connect/docs-bot -H "apikey: $EVOLUTION_API_
 ```
 O compose já configura o **webhook global** da Evolution para `http://app:3000/webhook/evolution?token=...`. O app aplica as migrations sozinho ao subir.
 
-### Opção B: Node local + Supabase
-1. Crie um projeto no Supabase. `pgvector` e `unaccent` já vêm disponíveis.
-2. Em **Storage**, crie um bucket **privado** chamado `documents`.
-3. Configure o `.env`:
-   ```env
-   DATABASE_URL=postgresql://postgres:<senha>@db.<ref>.supabase.co:5432/postgres
-   DATABASE_SSL=true
-   STORAGE_DRIVER=supabase
-   SUPABASE_URL=https://<ref>.supabase.co
-   SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
-   ```
-4. Rode:
-   ```bash
-   npm install
-   npm run migrate
-   npm run dev
-   ```
-5. Aponte o webhook da sua instância Evolution para `https://<seu-host>/webhook/evolution?token=<WEBHOOK_TOKEN>` com o evento `MESSAGES_UPSERT`.
+### Opção B: sem Docker (Windows/Mac/Linux) com Supabase
+Use esta opção se o Docker não funciona na sua máquina (ex.: "Virtualization support not detected").
+A montagem fica: **Supabase** (banco + arquivos) + **bot no seu PC** + **Evolution API na nuvem** + **ngrok** (túnel do webhook).
 
-> Para OCR de PDFs escaneados fora do Docker, instale o `poppler-utils` (`apt install poppler-utils` ou `brew install poppler`).
+**1. Supabase**
+1. Crie um projeto em https://supabase.com (região *South America (São Paulo)*) e anote a senha do banco.
+2. Abra **SQL Editor → New query**, cole todo o conteúdo de [`supabase/setup.sql`](supabase/setup.sql) e clique em **Run**. Isso cria as tabelas e o bucket privado `documents`.
+3. Anote as credenciais:
+   - **Project Settings → API**: *Project URL* e a chave **service_role** (secreta).
+   - **Connect → Session pooler**: string como `postgresql://postgres.<ref>:<senha>@aws-0-sa-east-1.pooler.supabase.com:5432/postgres`. Não use a "Direct connection", que só funciona por IPv6.
+
+**2. Evolution API na nuvem** (precisa ficar ligada 24h)
+1. No Railway (https://railway.app), faça o deploy do template **"Evolution API"**.
+2. Defina `AUTHENTICATION_API_KEY` (será a sua `EVOLUTION_API_KEY`) e gere um domínio público.
+3. Em `https://<dominio>/manager`, crie a instância `docs-bot` e escaneie o QR Code com o celular do **número do bot**.
+
+**3. Bot no seu PC** (Node.js 22)
+```bash
+npm install
+cp .env.example .env        # Windows: copy .env.example .env
+```
+No `.env`:
+```env
+OPENAI_API_KEY=sk-...
+DATABASE_URL=postgresql://postgres.<ref>:<senha>@aws-0-sa-east-1.pooler.supabase.com:5432/postgres
+DATABASE_SSL=true
+STORAGE_DRIVER=supabase
+SUPABASE_URL=https://<ref>.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
+EVOLUTION_API_URL=https://<dominio-da-evolution>
+EVOLUTION_API_KEY=<AUTHENTICATION_API_KEY>
+EVOLUTION_INSTANCE=docs-bot
+WEBHOOK_TOKEN=<texto aleatório com 16+ caracteres>
+ALLOWED_PHONES=<seu número pessoal, ex.: 5511999999999>
+```
+Se a senha tiver caracteres especiais, codifique-os na URL (`@` → `%40`).
+```bash
+npm run dev                 # 🚀 Bot ouvindo na porta 3000 (storage: supabase)
+```
+
+**4. Webhook (ngrok)**
+```bash
+ngrok http 3000
+```
+No Manager da Evolution, abra a instância → **Webhook**:
+- URL: `https://<seu-ngrok>/webhook/evolution?token=<WEBHOOK_TOKEN>`
+- Evento: `MESSAGES_UPSERT`
+- Webhook base64: ligado
+
+No plano gratuito, a URL do ngrok muda a cada reinício. Quando mudar, atualize o webhook.
+
+> OCR de PDFs escaneados precisa do `pdftoppm` (Poppler). Sem ele, o arquivo é salvo, mas o texto não é lido. Fotos funcionam sem instalar nada.
 
 ### Testes
 ```bash
